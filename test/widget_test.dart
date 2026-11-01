@@ -1,30 +1,29 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+class User {
+  final String id;
+  final String fullName;
+  final String email;
+  final String? avatarUrl;
 
-import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
-
-import 'package:case2_khmt2411029_nguyendangkhoa/main.dart';
-
-void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
-
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  const User({
+    required this.id,
+    required this.fullName,
+    required this.email,
+    this.avatarUrl,
   });
+
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
+      id: (json['_id'] ?? json['id'] ?? '').toString(),
+      fullName: (json['fullName'] ?? '').toString(),
+      email: (json['email'] ?? '').toString(),
+      avatarUrl: json['avatarUrl']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    '_id': id,
+    'fullName': fullName,
+    'email': email,
+    'avatarUrl': avatarUrl,
+  };
 }
