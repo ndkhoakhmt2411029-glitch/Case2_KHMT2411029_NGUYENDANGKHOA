@@ -2,7 +2,6 @@ const mongoose = require('mongoose');
 const Task = require('../models/Task');
 const TaskShare = require('../models/TaskShare');
 
-// Buổi 1: chỉ có các API đọc (GET). Thêm/sửa/xóa làm ở Buổi 2.
 const STATUSES = ['todo', 'in_progress', 'completed'];
 const PRIORITIES = ['low', 'medium', 'high'];
 const PRIORITY_RANK = { low: 1, medium: 2, high: 3 };
@@ -17,6 +16,12 @@ const currentUserId = (req) =>
 const fail = (res, status, message) => res.status(status).json({ message });
 
 const sameId = (a, b) => String(a && (a._id || a)) === String(b);
+
+const parseDate = (v) => {
+  if (v === undefined || v === null || v === '') return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? undefined : d; // undefined = không hợp lệ
+};
 
 // ---------- Phân quyền ----------
 // owner (người tạo) > editor (chia sẻ sửa) > assignee (được giao) > viewer
@@ -81,6 +86,38 @@ async function loadAccessible(req, res) {
   return { task, role };
 }
 
+// Kiểm tra và chuẩn hóa dữ liệu đầu vào cho tạo / sửa.
+function readBody(body, { partial = false } = {}) {
+  const out = {};
+  const errors = [];
+
+  if (!partial || body.title !== undefined) {
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!title) errors.push('Tên công việc không được để trống');
+    else if (title.length > 200) errors.push('Tên công việc tối đa 200 ký tự');
+    else out.title = title;
+  }
+  if (body.description !== undefined) {
+    out.description = String(body.description || '').trim();
+  }
+  if (body.priority !== undefined) {
+    if (!PRIORITIES.includes(body.priority)) errors.push('Mức độ ưu tiên không hợp lệ');
+    else out.priority = body.priority;
+  }
+  if (body.status !== undefined) {
+    if (!STATUSES.includes(body.status)) errors.push('Trạng thái không hợp lệ');
+    else out.status = body.status;
+  }
+  for (const key of ['startDate', 'dueDate']) {
+    if (body[key] !== undefined) {
+      const d = parseDate(body[key]);
+      if (d === undefined) errors.push(`${key === 'startDate' ? 'Ngày bắt đầu' : 'Hạn hoàn thành'} không hợp lệ`);
+      else out[key] = d;
+    }
+  }
+  return { data: out, errors };
+}
+
 // ---------- GET /tasks ----------
 exports.listTasks = async (req, res, next) => {
   try {
@@ -142,6 +179,84 @@ exports.getTask = async (req, res, next) => {
     const found = await loadAccessible(req, res);
     if (!found) return;
     res.json({ task: serialize(found.task, found.role) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ---------- POST /tasks ----------
+exports.createTask = async (req, res, next) => {
+  try {
+    const { data, errors } = readBody(req.body || {});
+    if (errors.length) return fail(res, 400, errors[0]);
+    if (data.startDate && data.dueDate && data.dueDate < data.startDate) {
+      return fail(res, 400, 'Hạn hoàn thành phải sau hoặc bằng ngày bắt đầu');
+    }
+    const created = await Task.create({ ...data, createdBy: currentUserId(req) });
+    const task = await populate(Task.findById(created._id));
+    res.status(201).json({ task: serialize(task, 'owner') });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ---------- PUT /tasks/:id ----------
+exports.updateTask = async (req, res, next) => {
+  try {
+    const found = await loadAccessible(req, res);
+    if (!found) return;
+    if (!permissionsOf(found.role).canEdit) {
+      return fail(res, 403, 'Bạn không có quyền chỉnh sửa công việc này');
+    }
+    const { data, errors } = readBody(req.body || {});
+    if (errors.length) return fail(res, 400, errors[0]);
+
+    const start = 'startDate' in data ? data.startDate : found.task.startDate;
+    const due = 'dueDate' in data ? data.dueDate : found.task.dueDate;
+    if (start && due && due < start) {
+      return fail(res, 400, 'Hạn hoàn thành phải sau hoặc bằng ngày bắt đầu');
+    }
+
+    Object.assign(found.task, data);
+    await found.task.save();
+    const task = await populate(Task.findById(found.task._id));
+    res.json({ task: serialize(task, found.role) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ---------- PATCH /tasks/:id/status ----------
+exports.updateStatus = async (req, res, next) => {
+  try {
+    const found = await loadAccessible(req, res);
+    if (!found) return;
+    if (!permissionsOf(found.role).canChangeStatus) {
+      return fail(res, 403, 'Bạn không có quyền đổi trạng thái công việc này');
+    }
+    const status = req.body && req.body.status;
+    if (!STATUSES.includes(status)) return fail(res, 400, 'Trạng thái không hợp lệ');
+
+    found.task.status = status;
+    await found.task.save();
+    const task = await populate(Task.findById(found.task._id));
+    res.json({ task: serialize(task, found.role) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ---------- DELETE /tasks/:id ----------
+exports.deleteTask = async (req, res, next) => {
+  try {
+    const found = await loadAccessible(req, res);
+    if (!found) return;
+    if (!permissionsOf(found.role).canDelete) {
+      return fail(res, 403, 'Chỉ người tạo mới được xóa công việc');
+    }
+    await TaskShare.deleteMany({ taskId: found.task._id });
+    await found.task.deleteOne();
+    res.json({ message: 'Đã xóa công việc' });
   } catch (err) {
     next(err);
   }

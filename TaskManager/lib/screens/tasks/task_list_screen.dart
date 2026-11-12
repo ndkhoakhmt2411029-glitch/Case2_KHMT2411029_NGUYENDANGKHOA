@@ -6,6 +6,7 @@ import '../../services/auth_service.dart';
 import '../../services/task_service.dart';
 import '../../widgets/loading_view.dart';
 import '../../widgets/task_card.dart';
+import 'task_create_screen.dart';
 import 'task_detail_screen.dart';
 
 /// Danh sách công việc liên quan đến người dùng (đọc từ MongoDB qua API).
@@ -59,6 +60,20 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
   }
 
+  Future<void> _openDetail(Task t) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: t.id)),
+    );
+    if (changed == true) _load();
+  }
+
+  Future<void> _openCreate() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const TaskCreateScreen()),
+    );
+    if (ok == true) _load();
+  }
+
   Widget _scopeBar() {
     return SizedBox(
       height: 52,
@@ -100,11 +115,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
               itemCount: _tasks.length,
               itemBuilder: (_, i) => TaskCard(
                 task: _tasks[i],
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => TaskDetailScreen(taskId: _tasks[i].id),
-                  ),
-                ),
+                onTap: () => _openDetail(_tasks[i]),
               ),
             ),
     );
@@ -129,6 +140,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
           if (_loading && _tasks.isNotEmpty) const LinearProgressIndicator(),
           Expanded(child: _list()),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openCreate,
+        icon: const Icon(Icons.add),
+        label: const Text('Thêm việc'),
       ),
     );
   }

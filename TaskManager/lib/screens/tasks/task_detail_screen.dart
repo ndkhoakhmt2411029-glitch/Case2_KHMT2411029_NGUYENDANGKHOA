@@ -7,8 +7,10 @@ import '../../utils/date_formatter.dart';
 import '../../widgets/loading_view.dart';
 import '../../widgets/priority_badge.dart';
 import '../../widgets/status_badge.dart';
+import '../assignment/assign_task_screen.dart';
+import '../sharing/task_sharing_screen.dart';
+import 'task_edit_screen.dart';
 
-/// Chi tiết công việc (chỉ xem). Sửa/xóa/giao việc/chia sẻ làm ở các buổi sau.
 class TaskDetailScreen extends StatefulWidget {
   final String taskId;
   const TaskDetailScreen({super.key, required this.taskId});
@@ -22,11 +24,22 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   Task? _task;
   bool _loading = true;
   String? _error;
+  bool _changed = false; // báo cho màn hình danh sách tải lại
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  void _snack(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(msg),
+        backgroundColor: error ? Theme.of(context).colorScheme.error : null,
+      ));
   }
 
   Future<void> _load() async {
@@ -40,6 +53,73 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
       _error = e.message;
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _edit() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => TaskEditScreen(task: _task!)),
+    );
+    if (ok == true) {
+      _changed = true;
+      _load();
+    }
+  }
+
+  Future<void> _openAssign(Task t) async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => AssignTaskScreen(task: t)),
+    );
+    _changed = true;
+    _load();
+  }
+
+  Future<void> _openShares(Task t) async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => TaskSharingScreen(task: t)),
+    );
+    _changed = true;
+    _load();
+  }
+
+  Future<void> _changeStatus(String status) async {
+    if (status == _task!.status) return;
+    try {
+      await _service.updateStatus(_task!.id, status);
+      _changed = true;
+      _snack('Đã cập nhật trạng thái');
+      await _load();
+    } on ApiException catch (e) {
+      _snack(e.message, error: true);
+    }
+  }
+
+  Future<void> _delete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xóa công việc'),
+        content: Text('Bạn có chắc muốn xóa "${_task!.title}"?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Hủy')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Xóa'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _service.deleteTask(_task!.id);
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      _snack(e.message, error: true);
     }
   }
 
@@ -85,6 +165,24 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                       fontWeight: FontWeight.w600)),
             ],
           ]),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (t.canEdit)
+                OutlinedButton.icon(
+                  onPressed: () => _openAssign(t),
+                  icon: const Icon(Icons.person_add_alt_1_outlined),
+                  label: const Text('Giao việc'),
+                ),
+              OutlinedButton.icon(
+                onPressed: () => _openShares(t),
+                icon: const Icon(Icons.share_outlined),
+                label: const Text('Chia sẻ'),
+              ),
+            ],
+          ),
           const Divider(height: 32),
           Text('Mô tả', style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
@@ -94,7 +192,8 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
               Text(DateFormatter.date(t.startDate))),
           _row(Icons.event, 'Hạn hoàn thành',
               Text(DateFormatter.date(t.dueDate))),
-          _row(Icons.person_outline, 'Người tạo', Text(t.creator?.label ?? '—')),
+          _row(Icons.person_outline, 'Người tạo',
+              Text(t.creator?.label ?? '—')),
           _row(Icons.star_outline, 'Phụ trách chính',
               Text(t.primaryAssignee?.label ?? '—')),
           _row(
@@ -114,6 +213,22 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
           ),
           _row(Icons.schedule, 'Tạo lúc', Text(DateFormatter.dateTime(t.createdAt))),
           _row(Icons.update, 'Cập nhật', Text(DateFormatter.dateTime(t.updatedAt))),
+          if (t.canChangeStatus) ...[
+            const Divider(height: 32),
+            Text('Cập nhật trạng thái', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              showSelectedIcon: false,
+              segments: TaskStatus.all
+                  .map((s) => ButtonSegment(
+                      value: s,
+                      label: Text(TaskStatus.label(s),
+                          style: const TextStyle(fontSize: 12))))
+                  .toList(),
+              selected: {t.status},
+              onSelectionChanged: (s) => _changeStatus(s.first),
+            ),
+          ],
         ],
       ),
     );
@@ -122,13 +237,33 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final t = _task;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Chi tiết công việc')),
-      body: _loading && t == null
-          ? const LoadingView()
-          : _error != null && t == null
-              ? ErrorView(message: _error!, onRetry: _load)
-              : _body(t!),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) Navigator.pop(context, _changed);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Chi tiết công việc'),
+          actions: [
+            if (t != null && t.canEdit)
+              IconButton(
+                  tooltip: 'Chỉnh sửa',
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: _edit),
+            if (t != null && t.canDelete)
+              IconButton(
+                  tooltip: 'Xóa',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: _delete),
+          ],
+        ),
+        body: _loading && t == null
+            ? const LoadingView()
+            : _error != null && t == null
+                ? ErrorView(message: _error!, onRetry: _load)
+                : _body(t!),
+      ),
     );
   }
 }
