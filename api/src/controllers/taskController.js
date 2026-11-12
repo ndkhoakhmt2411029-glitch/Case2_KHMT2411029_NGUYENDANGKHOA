@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Task = require('../models/Task');
 const TaskShare = require('../models/TaskShare');
+const notifier = require('../services/notificationService');
 
 const STATUSES = ['todo', 'in_progress', 'completed'];
 const PRIORITIES = ['low', 'medium', 'high'];
@@ -217,9 +218,17 @@ exports.updateTask = async (req, res, next) => {
       return fail(res, 400, 'Hạn hoàn thành phải sau hoặc bằng ngày bắt đầu');
     }
 
+    const oldDue = found.task.dueDate;
+    const oldStatus = found.task.status;
     Object.assign(found.task, data);
     await found.task.save();
     const task = await populate(Task.findById(found.task._id));
+    const actorId = currentUserId(req);
+    // Thông báo nền (không chặn phản hồi)
+    if (String(oldDue || '') !== String(task.dueDate || '')) {
+      notifier.notifyDueChanged(task, oldDue, actorId);
+    }
+    if (oldStatus !== task.status) notifier.notifyStatusChanged(task, oldStatus, actorId);
     res.json({ task: serialize(task, found.role) });
   } catch (err) {
     next(err);
@@ -237,9 +246,11 @@ exports.updateStatus = async (req, res, next) => {
     const status = req.body && req.body.status;
     if (!STATUSES.includes(status)) return fail(res, 400, 'Trạng thái không hợp lệ');
 
+    const oldStatus = found.task.status;
     found.task.status = status;
     await found.task.save();
     const task = await populate(Task.findById(found.task._id));
+    if (oldStatus !== status) notifier.notifyStatusChanged(task, oldStatus, currentUserId(req));
     res.json({ task: serialize(task, found.role) });
   } catch (err) {
     next(err);

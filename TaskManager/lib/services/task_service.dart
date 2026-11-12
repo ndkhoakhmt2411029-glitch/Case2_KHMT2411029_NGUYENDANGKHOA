@@ -23,6 +23,7 @@ class TaskService {
     String? scope, // created | assigned | shared | null = tất cả
     String? status,
     String? priority,
+    String? assigneeId, // lọc theo người phụ trách
     String? q,
     String sortBy = 'createdAt', // dueDate | priority | createdAt
     String order = 'desc', // asc | desc
@@ -31,6 +32,7 @@ class TaskService {
       if (scope != null) 'scope': scope,
       if (status != null) 'status': status,
       if (priority != null) 'priority': priority,
+      if (assigneeId != null) 'assigneeId': assigneeId,
       if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
       'sortBy': sortBy,
       'order': order,

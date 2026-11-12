@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const TaskShare = require('../models/TaskShare');
 const User = require('../models/User');
+const notifier = require('../services/notificationService');
 
 const FIELDS = 'fullName email avatarUrl';
 const PERMISSIONS = ['viewer', 'editor'];
@@ -91,6 +92,16 @@ exports.addShares = async (req, res, next) => {
       return fail(res, 400, 'Không thể chia sẻ cho người tạo công việc');
     }
 
+    // Chỉ thông báo cho người mới được chia sẻ hoặc bị đổi quyền
+    const before = await TaskShare.find({
+      taskId: req.task._id,
+      userId: { $in: targets.map((t) => t.user._id) },
+    }).lean();
+    const beforeMap = new Map(before.map((s) => [String(s.userId), s.permission]));
+    const changed = targets.filter(
+      (t) => beforeMap.get(String(t.user._id)) !== t.permission
+    );
+
     for (const t of targets) {
       // Đã chia sẻ trước đó thì cập nhật quyền, không tạo bản ghi trùng
       await TaskShare.findOneAndUpdate(
@@ -99,6 +110,7 @@ exports.addShares = async (req, res, next) => {
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
     }
+    if (changed.length) notifier.notifyShared(req.task, changed, req.currentUserId); // chạy nền
     res.status(201).json({ shares: await listFor(req.task._id) });
   } catch (err) {
     next(err);

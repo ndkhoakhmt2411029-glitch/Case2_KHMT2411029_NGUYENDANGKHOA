@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Task = require('../models/Task');
 const User = require('../models/User');
+const notifier = require('../services/notificationService');
 
 const FIELDS = 'fullName email avatarUrl';
 const MAX_PEOPLE = 50;
@@ -73,8 +74,12 @@ exports.addAssignees = async (req, res, next) => {
     if (r.error) return fail(res, 400, r.error);
 
     const task = req.task;
+    const added = []; // người mới được giao (để gửi thông báo + email)
     for (const u of r.users) {
-      if (!hasAssignee(task, u._id)) task.assigneeIds.push(u._id);
+      if (!hasAssignee(task, u._id)) {
+        task.assigneeIds.push(u._id);
+        added.push(u);
+      }
     }
 
     let primary = body.primaryAssigneeId ? String(body.primaryAssigneeId) : null;
@@ -93,6 +98,7 @@ exports.addAssignees = async (req, res, next) => {
     }
 
     await task.save();
+    if (added.length) notifier.notifyAssigned(task, added, req.currentUserId); // chạy nền
     await respond(res, task._id, 201);
   } catch (err) {
     next(err);
