@@ -10,6 +10,9 @@ app.use(express.json());
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/tasks', require('./routes/taskRoutes'));
+app.use('/api/users', require('./routes/userRoutes'));
+app.use('/api/tasks/:id/assignees', require('./routes/assignmentRoutes'));
+app.use('/api/tasks/:id/shares', require('./routes/taskShareRoutes'));
 
 app.use(notFound);
 app.use(errorHandler);
